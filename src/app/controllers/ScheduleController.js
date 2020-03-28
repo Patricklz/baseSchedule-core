@@ -4,7 +4,6 @@ import { Op } from 'sequelize';
 import User from '../models/user';
 import Appointments from '../models/appointment';
 
-
 class ScheduleController {
     async index(req, res) {
         const checkUserProvider = await User.findOne({ where: { id: req.userId, provider: true } });
