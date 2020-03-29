@@ -1,10 +1,13 @@
 import * as Yup from 'yup';
-import { startOfHour, parseISO, isBefore, format } from 'date-fns';
-import pt from 'date-fns/locale/pt';
+import { startOfHour, parseISO, isBefore, format, subHours } from 'date-fns';
+import ptBR from 'date-fns/locale/pt-BR';
 import User from '../models/user';
 import File from '../models/file';
 import Appointments from '../models/appointment';
 import Notification from '../schemas/NotificationSchema';
+
+import CancellationMail from '../jobs/CancellationMail';
+import BeeQueue from '../../lib/Queue';
 
 class AppointmentController {
     async index(req, res) {
@@ -76,12 +79,44 @@ class AppointmentController {
         const formattedDate = format(
             hourStart,
             "'dia' dd 'de' MMMM', às' H:mm'h'",
-            { locale: pt }
+            { locale: ptBR }
         );
 
         await Notification.create({
             content: `Novo agendamento de ${user.name} para o ${formattedDate}`,
             user: provider_id,
+        });
+
+        return res.json(appointment);
+    }
+
+    async delete(req, res) {
+        const appointment = await Appointments.findByPk(req.params.id, {
+            include: [
+                {
+                    model: User,
+                    as: 'provider',
+                    attributes: ['name', 'email'],
+                },
+            ],
+        });
+
+        if (appointment.user_id !== req.userId) {
+            return res.status(401).json({ error: "You don't have permission to cancel this appoitment." });
+        }
+
+        const dateWithSub = subHours(appointment.Date, 2);
+
+        if (isBefore(new Date(dateWithSub), new Date())) {
+            return res.status(401).json({ error: "You can only cancel appoitments two hours advace" })
+        }
+
+        appointment.canceled_at = new Date();
+
+        await appointment.save();
+
+        await BeeQueue.add(CancellationMail.key, {
+            appointment,
         });
 
         return res.json(appointment);
